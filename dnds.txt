@@ -1,0 +1,101 @@
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(clustree)
+library(BiocParallel)
+library(BPCells)
+library(ggplot2)
+register(BPPARAM = MulticoreParam(workers = 6))
+options(future.globals.maxSize = 1e9)
+library(tidyverse)
+library(cowplot)
+
+merged <- readRDS("E:/stomach/stomach.rds")
+merged@assays$RNA<-merged@assays$RNA_seuratv4
+DefaultAssay(merged)<-'RNA'
+merged@assays$RNA_seuratv4<-NULL
+merged@assays$RNA5<-NULL
+merged@assays$sketch<-NULL
+
+
+####dn/ds
+merged <- readRDS("E:/stomach/stomach.rds")
+merged@assays$RNA<-merged@assays$RNA_seuratv4
+DefaultAssay(merged)<-'RNA'
+merged@assays$RNA_seuratv4<-NULL
+merged@assays$RNA5<-NULL
+merged@assays$sketch<-NULL
+merged@assays$integrated<-NULL
+
+library(readxl)
+dnds<-read.table('D:/360MoveData/Users/Admin/Desktop/DNDS(1)/DNDS/dndsvalue.txt')
+dnds<-subset(dnds,dnds$PSG<10)
+colnames(dnds)<-c('gene','PSG')
+table(merged$samples)
+Idents(merged)<-merged$samples
+
+sub<-subset(merged,idents = c('SN','deer','camel'))
+
+df<-as.data.frame(table(merged$samples))
+df<-as.character(df$Var1)
+cell<-list()
+non_zero_genes<-list()
+all_gene<-list()
+primates_counts<-list()
+primates_meta<-list()
+primates_Gathered<-list()
+primates_psg<-list()
+primates_Gathered_PSG<-list()
+primates_Gathered_PSG_Summary<-list()
+all_psg<-data.frame()
+gathered<-list()
+
+Idents(merged)<-merged$samples
+df<-as.data.frame(table(merged$samples))
+df<-as.character(df$Var1)
+for (i in 1:length(df)) {
+  cell[[i]]<-subset(merged,idents=df[[i]])
+  non_zero_genes[[i]] <- rownames(cell[[i]])[rowSums(GetAssayData(cell[[i]], assay = "RNA", slot = "counts")) > 0]
+  cell[[i]]<- subset(cell[[i]], features = non_zero_genes[[i]])
+  #all_gene[[i]]<-rownames(cell[[i]])%>%as.data.frame()
+  #colnames(all_gene[[i]])<-'gene'
+  #primates_psg[[i]]<-left_join(all_gene[[i]],dnds)###mam_gene改为输入的不同纲的gene文件
+  #primates_psg[[i]][is.na(primates_psg[[i]])] <- 0
+  primates_counts[[i]]<-GetAssayData(cell[[i]])
+  cell[[i]]$sp_cell <- paste0(cell[[i]]$samples,"_",cell[[i]]$celltype)###添加meta信息，格式最终为species_cell
+  primates_meta[[i]]<-as.data.frame(cell[[i]]$sp_cell) 
+  cc<-rownames(primates_meta[[i]])
+  primates_meta[[i]]$cell<-cc
+  rownames(primates_meta[[i]])<-NULL
+  colnames(primates_meta[[i]])<-c('CELL_TYPE','CELL')
+  primates_counts[[i]] %>% 
+    as.matrix() %>%
+    as.data.frame() %>%
+    rownames_to_column() %>%
+    dplyr::rename(gene=rowname) %>% 
+    inner_join( dnds ) %>% 
+    gather(CELL,count,-PSG,-gene) %>% 
+    inner_join(primates_meta[[i]]) %>%
+    filter(count != 0) %>%
+    group_by(CELL,CELL_TYPE) %>% 
+    summarise( MEDIAN = median(PSG),
+               MEAN = mean(PSG) )  -> gathered[[i]]
+  all_psg<-rbind(all_psg,gathered[[i]])
+}
+
+all<- tidyr :: separate(all_psg, CELL_TYPE,into = c('species' , 'cell'), sep='_')
+all <- all_psg %>%
+  separate(CELL_TYPE, into = c("species", "organ", "cell"), sep = "_")
+all$species <- paste(all$species, all$organ, sep = "_")
+all$organ<-NULL
+
+
+ggplot(sp, aes(x = cell, y = MEAN, fill = cell)) +
+  geom_boxplot(
+    size = 0.5, outliers = FALSE,fatten = NULL) +
+  stat_summary(
+    fun = mean, geom = "errorbar", aes(ymax = after_stat(y), ymin = after_stat(y)), width = 0.6,        
+    size = 0.8,        color = "black",    linetype = "solid"  ) +
+  theme_bw() +   theme(axis.title.x = element_blank(),axis.ticks.x = element_blank(),axis.text.x.bottom = element_text(
+    angle = 45, vjust = 1, hjust = 1, size = 8, color = "black"),legend.position = "none") + 
+  scale_fill_manual(values = result$col) +ylab("dN/dS")

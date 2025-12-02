@@ -1,0 +1,59 @@
+import numpy as np
+import scanpy as sc
+import scib
+import matplotlib.pyplot as plt
+from scib_metrics.benchmark import Benchmarker, BioConservation, BatchCorrection
+
+adata = sc.read("all.h5ad")
+adata.obsm["Unintegrated"] = adata.obsm["X_pca"]
+
+###整合分析
+###scanorama整合
+import scanorama
+adata.obs["batch"] = adata.obs["orig.ident"]
+batch_cats = adata.obs.batch.cat.categories
+adata_list = [adata[adata.obs.batch == b].copy() for b in batch_cats]
+scanorama.integrate_scanpy(adata_list)
+adata.obsm["Scanorama"] = np.zeros((adata.shape[0], adata_list[0].obsm["X_scanorama"].shape[1]))
+for i, b in enumerate(batch_cats):
+    adata.obsm["Scanorama"][adata.obs.batch == b] = adata_list[i].obsm["X_scanorama"]
+
+###bbknn
+sc.pp.neighbors(adata)
+sc.tl.umap(adata)
+sc.tl.leiden(adata, flavor="igraph",resolution=0.5)
+sc.pl.umap(adata, color=["batch", "leiden"])
+sc.external.pp.bbknn(adata, batch_key="batch")
+sc.tl.umap(adata)
+sc.pl.umap(adata, color=["batch", "leiden"])
+
+
+####评估
+bm = Benchmarker(
+    adata,
+    batch_key="orig.ident",
+    label_key="seurat_clusters",
+    bio_conservation_metrics=BioConservation(),
+    batch_correction_metrics=BatchCorrection(),
+    embedding_obsm_keys=["X_cca","X_harmony","X_rpca","Unintegrated"],
+    n_jobs=6,
+)
+
+
+bm.benchmark()
+
+table = bm.plot_results_table()  
+fig = table.figure                
+fig.savefig("scib.pdf")
+
+from rich import print
+
+import pandas as pd
+
+df = bm.get_results()
+df.to_csv("scib.csv", index=True)
+
+
+
+
+

@@ -1,0 +1,368 @@
+##R
+library(Seurat)
+library(SeuratData)
+write.table(as.matrix(sheep@assays$RNA@data), 'cellphonedb_count.txt', sep='\t', quote=F)
+meta_data <- cbind(rownames(sheep@meta.data), sheep@meta.data[,'orig.ident', drop=F])  
+meta_data <- as.matrix(meta_data)
+meta_data[is.na(meta_data)] = "Unkown" 
+write.table(meta_data, 'pcellphonedb_meta.txt', sep='\t', quote=F, row.names=F)
+
+##python
+cellphonedb method statistical_analysis  cellphonedb_meta.txt  cellphonedb_count.txt --counts-data=gene_name 
+
+##Visualization in R
+##find clr
+sheep<-read.table("/statistical_analysis_significant_means.txt",header=T,quote="",sep="\t")
+
+sheep<-subset(sheep,sheep$rank<1)
+
+
+clr<-intersect(sheep$interacting_pair,goat$interacting_pair)
+
+
+##go
+clr<-as.data.frame(clr)
+split_data <- strsplit(clr$clr, split = "_", fixed = TRUE)
+split_vector <- unlist(split_data)
+unique_split_vector <- unique(split_vector)
+clr_gene <- data.frame(gene = unique_split_vector)
+gene =as.character(na.omit(AnnotationDbi::select(org.Hs.eg.db,keys = clr_gene$gene,columns = 'ENTREZID',keytype = 'SYMBOL')[,2]))
+clr_go <- enrichGO(gene, OrgDb = "org.Hs.eg.db", ont="BP")
+clr_go=DOSE::setReadable(clr_go, OrgDb='org.Hs.eg.db',keyType='ENTREZID')
+clr_ego <- simplify(clr_go, cutoff=0.7, by="p.adjust", select_fun=min)
+clr_ego@result$class<-'CLR'
+clr_ego<-subset(clr_ego@result,clr_ego@result$pvalue<0.05)
+
+
+
+
+##all_pairs
+all_pval =  read.table("statistical_analysis_pvalues.txt",header = T,sep = "\t",stringsAsFactors = F)
+all_means =  read.table("statistical_analysis_means.txt",header = T,sep = "\t",stringsAsFactors = F)
+all_pval$directionality<-NULL
+all_means$directionality<-NULL
+all_pval$classification<-NULL
+all_means$classification<-NULL
+intr_pairs = all_pval$interacting_pair
+all_pval = all_pval[,-c(1:11)]
+all_means = all_means[,-c(1:11)]
+sig_pairs <- all_pval
+#sig_pairs1 <- sig_pairs[,-c(1, 3:11)]
+sig_pairs <- sig_pairs[which(rowSums(sig_pairs<=0.05)!=0), ]
+dim(sig_pairs)
+sel_pval = all_pval[match(clr, intr_pairs),]#selected_celltype]#将上述需要呈现的受配体选出来
+sel_means = all_means[match(clr, intr_pairs),]# selected_celltype]
+df_names = expand.grid(clr)   #, selected_celltype)
+pval = unlist(sel_pval)
+pval[pval==0] = 0.00001
+plot.data = cbind(df_names,pval)
+pr = unlist(as.data.frame(sel_means))
+plot.data = cbind(plot.data,pr)
+colnames(plot.data) = c( 'clusters', 'pvalue', 'mean')
+plot.data$pair<-rownames(plot.data)
+plot<-gsub('.{1}$','',plot.data$pair)
+plot.data$pair<-plot
+plot.data$clusters <- gsub('[|]', '_', plot.data$clusters)
+my_palette <- colorRampPalette(c("darkblue","yellow","red"))(n=1000)
+my_palette <- colorRampPalette(c("#313695", "#4575B4", "#ABD9E9", "#FFFFB3", "#FDAE61", "#F46D43", "#D73027", "#A50026"))(n=1000)
+p<-ggplot(plot.data,aes(x=clusters,y=pair)) +
+  geom_point(aes(size=-log10(pvalue + 0.001),color=mean)) +
+  scale_size_continuous(range=c(1,5),breaks = c(0,1.0,2.0))+
+  scale_color_gradientn('Mean expression', colors=my_palette,limits=c(0,3)) +
+  coord_flip()+
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank(),
+        axis.text=element_text(size=10, colour = "black"),
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0, size=10),
+        axis.text.y = element_text(size=10, colour = "black"),
+        axis.title=element_blank(),
+        panel.border = element_rect(size = 0.7, linetype = "solid", colour = "black"))
+p<-subset(p[["data"]],p[["data"]]$pvalue<0.5)
+p$pair <- gsub("\\d+", "", p$pair)
+
+
+ggplot(p,aes(x=new,y=pair)) +
+  geom_point(aes(size=-log10(pvalue +0.0001),color=mean))+
+  scale_color_gradientn("means",colors = c("#313695", "#4575B4", "#ABD9E9", "#FFFFB3", "#F46D43", "#D73027", "#A50026"))+
+  theme_bw()+scale_size_continuous(range = c(1,3),name="-log10(pvals)")+
+  theme(
+    axis.title = element_blank(),
+    axis.text.x.bottom = element_text(hjust = 1, angle = 45, size=6, color = "black"),
+    axis.text.y.left = element_text(size = 8,color = "black"),
+    axis.ticks.length = unit(0.15,"cm")
+  )
+
+
+###network
+library(tidygraph)
+sig_p <- read.delim("./statistical_analysis_pvalues.txt", check.names = F)
+ks_cpdb_sig_interCount <- function(pval_data,
+                                   significant=0.05,
+                                   source_celltype,
+                                   color_set=NULL,
+                                   celltype_order=NULL,
+                                   showInter=F,
+                                   celltype.size=F,
+                                   scRNA=NULL,
+                                   cellanno=NULL,
+                                   group.size=F)
+
+{
+
+  requireNamespace("reshape2")
+  requireNamespace("ggplot2")
+  requireNamespace("ggraph")
+  requireNamespace("tidygraph")
+  requireNamespace("dplyr")
+  requireNamespace("igraph")
+
+  all_intr <- pval_data
+  col_start <- which(colnames(all_intr) == "classification")
+
+  intr_pairs <- all_intr$interacting_pair
+  all_intr <- t(all_intr[, -c(1:col_start)])
+  colnames(all_intr) <- intr_pairs
+  all_count <- reshape2::melt(all_intr)
+
+  all_count$significant <- all_count$value < significant
+
+  count1x <- all_count %>%
+    group_by(Var1) %>%
+    summarise(COUNT = sum(significant)) %>%
+    as.data.frame()
+
+
+  tmp <- lapply(count1x[, 1], function(x) strsplit(as.character(x), "\\|"))
+  tmp <- lapply(tmp, function(x) x[[1]])
+  tmp <- as.data.frame(do.call(rbind, tmp))
+  colnames(tmp) <- c("SOURCE", "TARGET")
+  count1x <- as.data.frame(cbind(count1x, tmp))
+  all_count <- count1x[, c("SOURCE", "TARGET", "COUNT")]
+
+
+
+  if (any(all_count$COUNT) > 0) {
+
+    count_mat <- reshape2::acast(SOURCE ~ TARGET, data = all_count, value.var = "COUNT")
+    count_mat[is.na(count_mat)] <- 0
+
+  }else{
+
+    stop("There are no significant results using p-value of: ", significant, call. = FALSE)
+
+  }
+
+  # return(count_mat)
+
+
+  #plot networks
+  plot_mat <- as.data.frame(count_mat)
+  sourecell <- which(colnames(plot_mat)==source_celltype)
+  plot_mat <- plot_mat[order(plot_mat[,sourecell], decreasing = TRUE),]
+
+
+  df <- data.frame(from = rep(source_celltype,nrow(plot_mat)),
+                   to = rownames(plot_mat),
+                   inter_num = plot_mat[,source_celltype])
+
+  
+  if(is.null(color_set)){
+
+    color.use <- c("#D51F26","#272E6A","#208A42","#89288F","#F47D2B", "#FEE500","#8A9FD1","#C06CAB", "#D8A767",
+                   "#90D5E4", "#89C75F","#F37B7D","#9983BD","#D24B27","#3BBCA8", "#6E4B9E","#0C727C", "#7E1416")
+
+    color.use <- color.use[1:nrow(plot_mat)]
+    names(color.use) <- df$to
+
+  }else{
+
+    color.use <- color_set
+
+    if(is.null(celltype_order)){
+
+      names(color.use) <- df$to
+
+    }else{
+
+      names(color.use) <- celltype_order
+    }
+
+  }
+
+
+
+  #nodes
+  nodes <- data.frame(name = df$to)
+  nodes$inter_num <- df$inter_num
+
+
+  if(group.size==F){
+
+    size = rep(5, nrow(plot_mat))
+    nodes$size <- size
+
+  }else{
+
+    metadata <- sheep@meta.data
+    celltypesize = as.data.frame(table(metadata[,cellanno]))
+    colnames(celltypesize) <- c('name',"size")
+    nodes = merge(nodes, celltypesize, by='name', all=F)
+
+    nodes <- nodes[order(nodes[,"size"], decreasing = TRUE),]
+
+  }
+
+  #edge
+  edges <- df[c("from","to","inter_num")]
+
+  #network plot
+  net <- tbl_graph(nodes = nodes, edges = edges)
+
+  #plot
+  p=ggraph(net,layout='igraph', algorithm = 'circle') +
+    geom_edge_bend(mapping = aes(edge_width = inter_num),
+                   strength = 0.2,alpha = 0.8,
+                   flipped =F, edge_color = "#A9AAAA",
+                   n=50, show.legend = F,
+                   check_overlap =T)+
+    geom_edge_loop(aes(edge_width = inter_num,
+                       direction = (from - 1)*360 / length(net)),
+                   colour = "#A9AAAA",
+                   alpha = 0.5, show.legend = F)+
+    scale_edge_width_continuous(range = c(0,5))
+
+
+  if(showInter==F){
+
+
+    p = p+geom_node_point(aes(size=size,colour = name), show.legend = F) +
+      geom_node_point(aes(size=size), show.legend = F,
+                      shape=21,colour = 'black',stroke = 1.5)+
+      geom_node_text(aes(x = x*1.06, y=y*1.06, label=name),
+                     angle=0,hjust=0, size=3) + 
+      scale_size_continuous(range = c(1, 15))+
+      scale_color_manual(values = color.use)+
+      theme_graph()+
+      theme(plot.margin = unit(c(2, 2, 2, 2), "cm"))
+
+  }else{
+
+    if(celltype.size==T){
+
+      p = p+geom_node_point(aes(size=size,colour = inter_num)) +
+        geom_node_point(aes(size=size), show.legend = F,
+                        shape=21,colour = 'black',stroke = 1.5)+
+        geom_node_text(aes(x = x*1.06, y=y*1.06, label=name),
+                       angle=0,hjust=0, fontface="bold",size=3) + 
+        scale_color_gradientn(colors = colorRampPalette(c("#2166AC",'#478ABF','#90C0DC', "white",'#EF8C65','#CF4F45',"#B2182B"))(100))+
+        scale_size_continuous(range = c(1, 10))+
+        theme_graph()+
+        theme(plot.margin = unit(c(2, 2, 2, 2), "cm"))
+
+    }else{
+
+      p = p+geom_node_point(aes(size=inter_num,colour = inter_num)) +
+        geom_node_point(aes(size=inter_num), show.legend = F,
+                        shape=21,colour = 'black',stroke = 1.5)+
+        geom_node_text(aes(x = x*1.06, y=y*1.06, label=name),
+                       angle=0,hjust=0, fontface="bold",size=3) + 
+        scale_color_gradientn(colors = colorRampPalette(c("#2166AC",'#478ABF','#90C0DC', "white",'#EF8C65','#CF4F45',"#B2182B"))(100))+
+        scale_size_continuous(range = c(1, 10))+
+        theme_graph()+
+        theme(plot.margin = unit(c(2, 2, 2, 2), "cm"))
+
+    }
+
+
+  }
+
+  return(p)
+
+
+}
+
+df<-as.data.frame(table(sheep$cell))
+df<-as.character(df$Var1)
+a<-list()
+count<-data.frame()
+for (i in 1:length(df)) {
+  a[[i]]<-ks_cpdb_sig_interCount(pval_data = sig_p,
+                                 significant=0.05,
+                                 source_celltype = df[[i]],
+                                 showInter=T,
+                                 celltype.size=T,
+                                 scRNA = sheep,
+                                 cellanno = 'cell',
+                                 group.size = T)
+  a[[i]][["data"]]$source<-df[[i]]
+  a[[i]][["data"]]$x<-NULL
+  a[[i]][["data"]]$y<-NULL
+  a[[i]][["data"]]$size<-NULL
+  a[[i]][["data"]]$.ggraph.orig_index<-NULL
+  a[[i]][["data"]]$circular<-NULL
+  a[[i]][["data"]]$.ggraph.index<-NULL
+  colnames(a[[i]][["data"]])<-c('TARGET','count','SOURCE')
+  count<-rbind(count,a[[i]][["data"]])
+}
+
+items <- unique(c(as.character(count$TARGET), as.character(count$SOURCE)))
+
+# Initialize an empty data frame to store the sums
+sums_df <- data.frame(TARGET = character(), count = numeric(), SOURCE = character())
+
+# Loop over each item and calculate the sums
+for(item in items) {
+  sum_count <- sum(count$count[count$TARGET == item | count$SOURCE == item])
+  sums_df <- rbind(sums_df, data.frame(TARGET = item, count = sum_count, SOURCE = "sum"))
+}
+
+sums_df <- sums_df[order(sums_df$TARGET),]
+
+##plot
+library(tidyr)
+library(CellChat)
+df.net <- spread(count, TARGET, count)
+rownames(df.net) <- df.net$SOURCE
+df.net <- df.net[, -1]
+df.net <- as.matrix(df.net)
+netVisual_circle(df.net, vertex.weight = sums_df$count,
+                 weight.scale = T, label.edge= F,edge.width.max = 10,arrow.size=0.4,
+                 title.name = "Number of interactions")
+write.csv(count,file = 'count.csv')
+write.csv(sums_df,file = 'sum.csv')
+
+##热图
+library(tidyr)
+count_matrix<-spread(count, TARGET, count)
+rownames(count_matrix) <- count_matrix$SOURCE
+df <- count_matrix$SOURCE
+count_matrix <- count_matrix[, -1]
+rownames(count_matrix) <- df
+count_matrix <- as.matrix(count_matrix)
+
+library(pheatmap)
+pheatmap(count_matrix, show_rownames = T, show_colnames = T, scale="none", cluster_cols = T,
+         border_color='white', cluster_rows = T, fontsize_row = 14, fontsize_col = 14,
+         main = "", treeheight_row = 0, family = 'Arial',
+         color = colorRampPalette(c("dodgerblue4",'peachpuff','deeppink4' ))( 1000 ),
+         treeheight_col = 0,
+         fontsize_number=12,
+         number_format="%.0f", legend_labels = c(0,300))
+
+library(ktplots)
+sig_p <- read.delim("./statistical_analysis_pvalues.txt", check.names = F)
+plot_cpdb_heatmap(pvals=sig_p, degs_analysis=F, title="Sum of significant interactions")
+
+
+
+
+
+
+
+
+
+
+
+
+

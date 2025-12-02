@@ -1,0 +1,26 @@
+library(dplyr)
+library(Seurat)
+library(patchwork)
+library(clustree)
+library(BiocParallel)
+library(BPCells)
+library(ggplot2)
+register(BPPARAM = MulticoreParam(workers = 6))
+options(future.globals.maxSize = 1e9)
+merged[["RNA5"]] <- as(object = merged[["RNA"]], Class = "Assay5")
+DefaultAssay(merged)
+Assays(merged)
+merged[["RNA_seuratv4"]] <-  merged[['RNA']]
+merged[['RNA']]=merged[['RNA5']]
+merged <- NormalizeData(merged)
+merged <- FindVariableFeatures(merged)
+merged <- SketchData(merged,
+                     ncells = 50000,
+                     method = "LeverageScore",
+                     sketched.assay = "sketch"
+)
+DefaultAssay(merged) <- "sketch"
+merged <- NormalizeData(merged)
+merged <- FindVariableFeatures(merged)
+merged <- ScaleData(merged)
+merged <- RunPCA(merged)

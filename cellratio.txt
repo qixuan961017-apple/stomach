@@ -1,0 +1,14 @@
+##cellratio
+Idents(merged)<-merged$celltype
+Cellratio <- prop.table(table(Idents(merged), merged$species), margin = 2)
+Cellratio <- as.data.frame(Cellratio)
+ggplot(Cellratio) +
+  geom_bar(aes(x =Var2, y= Freq, fill = Var1),stat = "identity",width = 0.8,size = 0.5)+
+  theme_classic() +
+  labs(x='Sample',y = 'Ratio')+
+  theme(panel.border = element_rect(fill=NA, size=0.5, linetype="solid"))+scale_fill_manual(values = color$col)
+end<-subset(Cellratio,Cellratio$Var1%in%c('Capillaries endothelial','Lymphatic endothelial'))
+ggplot(end, aes(x = Var2, y = Freq,  color = Var1,group=Var1)) +
+  geom_point() +
+  geom_line() +
+  geom_hline(aes(yintercept=0), alpha = 0.65)+scale_color_manual(values=c('#f5e091','#f3cb45'))+theme_classic()

@@ -1,0 +1,58 @@
+####MetaNeighbor
+library(MetaNeighbor)
+merged<-as.SingleCellExperiment(merged)
+var_genes = variableGenes(dat = merged, exp_labels = merged$species)
+celltype_NV = MetaNeighborUS(var_genes = var_genes,
+                             dat = pbmc,
+                             study_id = pbmc$orig.ident,
+                             cell_type = pbmc$ident,
+                             fast_version = TRUE)
+
+df<-as.data.frame(table(merged$species))
+get_species <- function(names) sapply(strsplit(names, "\\|"), `[`, 1)
+row_species <- get_species(rownames(species_one_vs_best))
+col_species <- get_species(colnames(species_one_vs_best))
+row_order <- order(match(row_species, df$Var1))
+col_order <- order(match(col_species, df$Var1))
+ordered_matrix <- species_one_vs_best[row_order, col_order]
+
+row_names <- rownames(ordered_matrix)
+cell_types <- sapply(strsplit(row_names, "\\|"), `[`, 2)
+cell_types<-as.data.frame(cell_types)
+df<-as.data.frame(table(merged$celltype))
+cell_types$cell_types<-factor(cell_types$cell_types,levels =df$Var1)
+
+order <- order(cell_types$cell_types)
+sorted_matrix <- ordered_matrix[order, order]
+plotHeatmap(sorted_matrix,cex=0.5,Rowv = FALSE, Colv = FALSE, cexRow = 0.8, cexCol = 0.8)
+
+
+result<-list()
+all<-data.frame()
+
+data<-melt(MetaNeighbor_species_all)
+
+df<-cell_types
+
+
+for (i in 1:length(df)) {
+  result[[i]] <- data[grepl(df[[i]], data$Var1) & grepl(df[[i]], data$Var2), ]
+  result[[i]]$cell<-df[[i]]
+  all<-rbind(all,result[[i]])
+}
+
+
+all$cell<-factor(all$cell,levels =  cell_types)
+
+ggplot(all, aes(fill=cell, y=value, x=cell)) +
+  geom_boxplot(outliers = F)+
+  stat_summary(fun.data = "mean_sd", geom = "errorbar", width = .10,
+               size = 0.1,
+               position = position_dodge(0.2)) +
+  theme_bw()+
+  theme(
+    panel.grid = element_blank(),
+    axis.title = element_blank(),
+    axis.ticks = element_blank(),
+    axis.text.x.bottom = element_text(angle = 45,vjust = 1,hjust = 1,size = 8,color="black"),
+  )

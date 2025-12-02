@@ -1,0 +1,118 @@
+
+##MAGMA的安装
+##linux系统下操作（自己新建一个文件夹）
+wget https://ctg.cncr.nl/software/MAGMA/prog/magma_v1.10.zip
+unzip magma_v1.10.zip
+wget https://ctg.cncr.nl/software/MAGMA/aux_files/NCBI37.3.zip
+unzip NCBI37.3.zip
+##这个文件需要看你自己的GWAS数据，按需下载
+wget https://ctg.cncr.nl/software/MAGMA/ref_data/g1000_eur.zip
+unzip g1000_eur.zip
+##linux
+magma_dir= /XXX/scDRS/input 
+mkdir -p out/step1
+${magma_dir}/magma \
+    --annotate window=10,10 \
+    --snp-loc ${magma_dir}/g1000_eur.bim \
+    --gene-loc ${magma_dir}/NCBI37.3.gene.loc \
+    --out out/step1
+
+mkdir -p out/step2
+${magma_dir}/magma \
+    --bfile ${magma_dir}/g1000_eur \
+    --pval ${cancer}cancer_all.tsv use=2,13 ncol=6 \
+    --gene-annot out/step1.genes.annot \
+    --out out/step2
+##R
+##删除不需要的列
+library(dplyr)
+cancer<-read.csv('step2_genes.csv')
+cancer$CHR<-NULL
+cancer$START<-NULL
+cancer$STOP<-NULL
+cancer$NSNPS<-NULL
+cancer$NPARAM<-NULL
+cancer$N<-NULL
+cancer$P<-NULL
+##基因id转换
+library(clusterProfiler)
+s2ens = bitr(cancer$GENE, fromType="ENTREZID", toType="SYMBOL", OrgDb="org.Hs.eg.db")
+data<-subset(cancer,cancer$GENE%in%s2ens$ENTREZID)
+data$gene_symbol<-s2ens$SYMBOL
+data$GENE<-NULL
+data$z_score<-data$ZSTAT
+data$ZSTAT<-NULL
+write.table(data,file = 'cancer.tsv',row.names = F,sep="\t",quote=F)
+##linux
+git clone https://github.com/martinjzhang/scDRS.git
+cd scDRS
+git checkout -b v102 v1.0.2
+pip install -e .
+python -m pytest tests/test_CLI.py -p no:warnings
+pip install scdrs==1.0.
+##liunx
+scdrs munge-gs \
+    --out-file out_file.gs \
+    --zscore-file cancer.tsv \
+    --weight zscore \
+    --n-max 1000
+##R
+remotes::install_github("mojaveazure/seurat-disk")
+library(SeuratDisk)
+human <- readRDS("human.rds")
+SaveH5Seurat(human,filename="human.h5seurat", overwrite = TRUE)
+Convert("human.h5seurat", dest = "h5ad", overwrite = TRUE
+##linux
+scdrs compute-score \
+    --h5ad-file human.h5ad\
+    --h5ad-species human\
+    --gs-file out_file.gs\
+    --gs-species human\
+    --out-folder out\
+    --flag-filter-data True\
+    --flag-raw-count True\
+    --n-ctrl 1000\
+    --flag-return-ctrl-raw-score False\
+    --flag-return-ctrl-norm-score True
+##python
+import scdrs
+import scanpy as sc
+sc.set_figure_params(dpi=125)
+from anndata import AnnData
+from scipy import stats
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+import os
+import warnings
+df_gs = pd.read_csv("out_file.gs", sep="\t", index_col=0)
+
+for trait in dict_score:
+    adata.obs[trait] = dict_score[trait]["norm_score"]
+    
+dict_score = {
+    trait: pd.read_csv(f"ZSTAT.full_score", sep="\t", index_col=0)
+    for trait in df_gs.index
+}
+adata = sc.read_h5ad("human.h5ad")
+sc.pl.umap(
+    adata,
+    color=dict_score.keys(),
+    color_map="RdBu_r",
+    vmin=-5,
+    vmax=5,
+    s=20,
+)
+
+##linux
+scdrs perform-downstream \
+    --h5ad-file human.h5ad\
+    --score-file /path/ZSTAT.full_score.gz\
+    --out-folder down\
+    --group-analysis subcell \
+    --gene-analysis\
+    --flag-filter-data True\
+    --flag-raw-count True
+
+

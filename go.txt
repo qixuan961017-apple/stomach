@@ -1,0 +1,28 @@
+##go
+library(data.table)
+library(ggplot2)
+library(dplyr)
+library(stringr)
+library(clusterProfiler)
+library(DOSE)
+library(org.Hs.eg.db)
+library(aPEAR)
+df<-as.data.frame(table(cell_marker$cluster))
+df<-as.character(df$Var1)
+t<-list()
+gene<-list()
+go<-list()
+library(stringr)
+ego<-list()
+for (i in 1:length(df)) {
+  t[[i]]<-subset(cell_marker,cell_marker$cluster%in%df[[i]])
+  gene[[i]] =as.character(na.omit(AnnotationDbi::select(org.Hs.eg.db,
+                                                        keys = t[[i]]$gene,
+                                                        columns = 'ENTREZID',
+                                                        keytype = 'SYMBOL')[,2]))
+  go[[i]] <- enrichGO(gene[[i]], OrgDb = "org.Hs.eg.db", ont="BP")
+  ego[[i]] <- simplify(go[[i]], cutoff=0.7, by="p.adjust", select_fun=min)
+  go[[i]]=DOSE::setReadable(go[[i]], OrgDb='org.Hs.eg.db',keyType='ENTREZID')
+  ego[[i]]=DOSE::setReadable(ego[[i]], OrgDb='org.Hs.eg.db',keyType='ENTREZID')
+
+}
